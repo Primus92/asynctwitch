@@ -88,8 +88,8 @@ def create_timer(message, channel, time):
 def ratelimit_wrapper(coro):
     @asyncio.coroutine
     def wrapper(self, *args, **kwargs):
+        print(self.message_count)
         max = 100 if self.is_mod else 20
-
         while self.message_count == max:
             yield from asyncio.sleep(1)
 
@@ -147,6 +147,8 @@ class Bot:
             self.loop = asyncio.get_event_loop()
 
         self.cache_length = kwargs.get("cache") or 100
+
+        self.response = False
 
         asyncio.set_event_loop(self.loop)
         self.host = "irc.chat.twitch.tv"
@@ -329,7 +331,7 @@ class Bot:
 
     @asyncio.coroutine
     @ratelimit_wrapper
-    def say(self, channel, message):
+    def say(self, channel, message, response=False):
         """
         Send a message to the specified channel.
         
@@ -340,7 +342,6 @@ class Bot:
         message : str
             The message to send.
         """
-
         if len(message) > 500:
             raise Exception(
                 "The maximum amount of characters in one message is 500,"
@@ -350,7 +351,10 @@ class Bot:
         while message.startswith("."):  # Use Bot.ban, Bot.timeout, etc instead
             message = message[1:]
 
+        self.response = response
+
         yield from self._send_privmsg(channel, message)
+        # waits for answer
 
     @asyncio.coroutine
     def _nick(self):
@@ -388,8 +392,7 @@ class Bot:
     def _send_privmsg(self, channel, s):
         """ DO NOT USE THIS YOURSELF OR YOU RISK GETTING BANNED FROM TWITCH """
         s = s.replace("\n", " ")
-        self.writer.write("PRIVMSG #{} :{}\r\n".format(
-            channel, s).encode('utf-8'))
+        self.writer.write("PRIVMSG #{} :{}\r\n".format(channel, s).encode('utf-8'))
 
     # The following are Twitch commands, such as /me, /ban and /host, so I'm
     # not going to put docstrings on these
@@ -755,7 +758,12 @@ class Bot:
 
                         yield from self._cache(messageobj)
 
-                        yield from self.event_message(messageobj)
+                        if not self.response:
+                            yield from self.event_message(messageobj)
+                        else:
+                            self.response = False
+                            yield from self.event_response(messageobj)
+
 
                     elif action == "WHISPER":
                         sender = self.regex["author"].match(
@@ -847,7 +855,7 @@ class Bot:
     # Events called by TCP connection
 
     @asyncio.coroutine
-    def event_notice(self, tags):
+    def event_notice(self, channel, tags):
         """
         Called on NOTICE events (when commands are called).
         """
@@ -955,6 +963,13 @@ class Bot:
     def event_message(self, message):
         """
         Called when a message is sent by someone in chat.
+        """
+        pass
+
+    @asyncio.coroutine
+    def event_response(self, message):
+        """
+            Called when a message is sent as a response by someone in chat.
         """
         pass
 
@@ -1103,6 +1118,13 @@ class CommandBot(Bot):
         yield from self.parse_commands(m)
 
     @asyncio.coroutine
+    def event_response(self, message):
+        """
+            Called when a message is sent as a response by someone in chat.
+        """
+        pass
+
+    @asyncio.coroutine
     def parse_commands(self, rm):
         """
         The command parser. It is not recommended to override this.
@@ -1119,12 +1141,10 @@ class CommandBot(Bot):
             m = " ".join(cl)
 
             if w in self.commands:
-                if not self.commands[w].unprefixed:
-                    if self.commands[
-                            w].admin and rm.author.name not in self.admins:
-                        yield from self.say(
-                            "You are not allowed to use this command")
-                    yield from self.commands[w].run(rm)
+                if self.commands[w].admin and rm.author.name not in self.admins:
+                    yield from self.say("You are not allowed to use this command")
+                else:
+                    yield from self.commands[w].run(rm) 
 
         else:
             cl = rm.content.split(" ")

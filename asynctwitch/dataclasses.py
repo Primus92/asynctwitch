@@ -481,13 +481,15 @@ class Message:
 class Command:
     """ A command class to provide methods we can use with it """
 
-    def __init__(self, bot, comm, desc='', alias=[], admin=False, unprefixed=False, listed=True, has=""):
+    def __init__(self, bot, comm, desc='', alias=[], admin=False, unprefixed=False, listed=True):
         self.comm = comm
         self.desc = desc
         self.alias = alias
         self.admin = admin
         self.listed = listed
         self.unprefixed = unprefixed
+        self.has = has
+        self.bot = bot
         self.subcommands = {}
         bot.commands[comm] = self
         for a in self.alias:
@@ -499,21 +501,15 @@ class Command:
 
     def __call__(self, func):
         """ Make it able to be a decorator """
-
+        print(func)
         self.func = func
-
         return self
 
     @asyncio.coroutine
     def run(self, message):
         """ Does type checking for command arguments """
-        if self.has != '':
-            if getattr(message.channel.permissions_for(message.author), self.has) is False and message.author.id not in self.cog.bot.admins:
-                yield from self.cog.bot.send_message(message.channel, "You do not have permission to use this command. Required permission: `{}`".format(self.has.replace("_", " ")))
-                return
-    
-        args = message.content[len(self.cog.bot.prefix):].split(" ")[1:]
-
+        
+        args = message.content[len(self.bot.prefix):].split(" ")[1:]
         args_name = inspect.getfullargspec(self.func)[0][1:]
         
         if len(args) > len(args_name):
@@ -522,7 +518,6 @@ class Command:
             args = args[:len(args_name)]
             
         ann = self.func.__annotations__
-        
         for x in range(0, len(args_name)):
             try:
                 v = args[x]
@@ -543,6 +538,7 @@ class Command:
         if len(list(self.subcommands.keys()))>0:
             try:
                 subcomm = args.pop(0).split(" ")[0]
+                
             except Exception:
                 yield from self.func(message, *args)
                 return
@@ -553,10 +549,12 @@ class Command:
                 yield from self.subcommands[subcomm].run(message)
             
             else:
+                
                 yield from self.func(message, *args)
             
         else:
             try:
+                print("IN FUCNTION")
                 yield from self.func(message, *args)
             except TypeError as e:
                 if len(args) < len(args_name):
